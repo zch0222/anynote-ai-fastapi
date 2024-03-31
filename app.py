@@ -1,7 +1,37 @@
 from fastapi import FastAPI
 from core.logger import get_logger
+from controller.rag_controller import rag_router
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from model.dto import ResData
+from exceptions import BusinessException
 
 app = FastAPI()
+
+# 路由
+app.include_router(rag_router)
+
+
+# 业务异常处理
+@app.exception_handler(BusinessException)
+async def business_exception_handler(request: Request, exc: BusinessException):
+    logger = get_logger()
+    logger.exception("An error occurred while processing request")
+    return JSONResponse(
+        status_code=200,
+        content=ResData.error(exc.message)
+    )
+
+
+# 全局异常处理
+@app.exception_handler(Exception)
+async def exception_handler(request: Request, exc: Exception):
+    logger = get_logger()
+    logger.exception("An error occurred while processing request")
+    return JSONResponse(
+        status_code=200,
+        content=ResData.error("An error occurred while processing requests")
+    )
 
 
 @app.on_event("startup")
