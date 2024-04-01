@@ -24,7 +24,7 @@ class RagService:
         self.llm = OpenAI(model=RAG_LLM_MODEL)
         self.logger = get_logger()
 
-    def get_query_engine_tool(self, hash_value: str):
+    def get_query_engine_tool(self, hash_value: str, file_name: str, author: str, category: str, description: str):
         vector_index_path = f"{RAG_PERSIST_DIR}/{hash_value}"
         if not os.path.exists(vector_index_path):
             raise BusinessException("文件索引不存在")
@@ -37,9 +37,9 @@ class RagService:
         query_engine_tool = QueryEngineTool(
             query_engine=query_engine,
             metadata=ToolMetadata(
-                name=hash_value,
+                name=file_name,
                 description=(
-                    "File query engine"
+                    f"file name is {file_name}, author is {author}, category is {category}, {description}"
                 ),
             ),
         )
@@ -66,7 +66,9 @@ class RagService:
 
     def query(self, rag_query_dto: RagQueryDTO) -> RagQueryVO:
         self.logger.info(f"START RAG QUERY, hash: {rag_query_dto.file_hash}, prompt: {rag_query_dto.prompt}")
-        query_engine = self.get_query_engine_tool(rag_query_dto.file_hash)
+        query_engine = self.get_query_engine_tool(rag_query_dto.file_hash, rag_query_dto.file_name,
+                                                  rag_query_dto.author, rag_query_dto.category,
+                                                  rag_query_dto.description)
         agent = ReActAgent.from_tools(
             [query_engine], llm=self.llm, verbose=True, max_iterations=20
         )
