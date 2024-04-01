@@ -15,7 +15,7 @@ class PandasService:
 
     def query_csv(self, pandas_query_dto: PandasQueryDTO) -> PandasQueryVO:
         self.logger.info(f"PANDAS QUERY START url: {pandas_query_dto.url}, prompt: {pandas_query_dto.prompt}")
-        file_download_dto = download_file(pandas_query_dto.file_path, PANDAS_DATA_PATH)
+        file_download_dto = download_file(pandas_query_dto.url, PANDAS_DATA_PATH)
         if not file_download_dto:
             raise BusinessException("下载失败")
         df = pd.read_csv(file_download_dto.file_path)
