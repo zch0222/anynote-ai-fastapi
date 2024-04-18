@@ -58,6 +58,7 @@ class RagService:
         return vector_index_path
 
     def index_pdf(self, rag_file_index_dto: RagFileIndexDTO) -> RagFileIndexVO:
+        self.logger.info(f"Start indexing: {rag_file_index_dto.file_path}")
         file_download_dto = download_file(rag_file_index_dto.file_path, RAG_PDF_DIR)
         if not file_download_dto:
             raise BusinessException("下载文件失败")

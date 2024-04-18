@@ -5,7 +5,7 @@ from typing import List, Any
 
 @dataclass
 class ResData:
-    code: int
+    code: str
     msg: str
     data: object
 
@@ -18,10 +18,10 @@ class ResData:
 
     @staticmethod
     def success(data: object):
-        res_data = ResData(0, "", data)
+        res_data = ResData("00000", "", data)
         return res_data.to_dict()
 
     @staticmethod
     def error(msg: str):
-        res_data = ResData(1, msg, {})
+        res_data = ResData("A0001", msg, {})
         return res_data.to_dict()
