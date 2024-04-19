@@ -37,9 +37,10 @@ class RagService:
         query_engine_tool = QueryEngineTool(
             query_engine=query_engine,
             metadata=ToolMetadata(
-                name=file_name,
+                name="RAG",
                 description=(
                     f"file name is {file_name}, author is {author}, category is {category}, {description}"
+                    f"{file_name}"
                 ),
             ),
         )
