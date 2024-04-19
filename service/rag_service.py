@@ -1,7 +1,7 @@
 from llama_index.core import VectorStoreIndex, load_index_from_storage, StorageContext, SimpleDirectoryReader
 from llama_index.core.tools import QueryEngineTool, ToolMetadata
 from llama_index.llms.openai import OpenAI
-
+from llama_index.llms.ollama import Ollama
 from llama_index.core.agent import AgentRunner, ReActAgent
 from llama_index.agent.openai import OpenAIAgentWorker, OpenAIAgent
 from llama_index.agent.openai import OpenAIAgentWorker
@@ -20,8 +20,14 @@ from core.config import RAG_LLM_MODEL
 
 class RagService:
 
+    def get_model(self):
+        if "mistral" == RAG_LLM_MODEL:
+            return Ollama(model="mistral", request_timeout=300.0)
+        else:
+            return OpenAI(model=RAG_LLM_MODEL)
+
     def __init__(self):
-        self.llm = OpenAI(model=RAG_LLM_MODEL)
+        self.llm = self.get_model()
         self.logger = get_logger()
 
     def get_query_engine_tool(self, hash_value: str, file_name: str, author: str, category: str, description: str):
@@ -66,15 +72,22 @@ class RagService:
         self.build_vector_index(file_download_dto)
         return RagFileIndexVO(hash=file_download_dto.hash_value)
 
+    def run_agent(self, query_engines, llm, prompt: str):
+        agent = ReActAgent.from_tools(
+            query_engines, llm=llm, verbose=True, max_iterations=20
+        )
+        response = agent.chat(prompt)
+        return response
+
     def query(self, rag_query_dto: RagQueryDTO) -> RagQueryVO:
         self.logger.info(f"START RAG QUERY, hash: {rag_query_dto.file_hash}, prompt: {rag_query_dto.prompt}")
         query_engine = self.get_query_engine_tool(rag_query_dto.file_hash, rag_query_dto.file_name,
                                                   rag_query_dto.author, rag_query_dto.category,
                                                   rag_query_dto.description)
-        agent = ReActAgent.from_tools(
-            [query_engine], llm=self.llm, verbose=True, max_iterations=20
-        )
-        response = agent.chat(rag_query_dto.prompt)
-        self.logger.info(f"END RAG QUERY, hash: {rag_query_dto.file_hash}, prompt: {rag_query_dto.prompt}, response: {str(response)}")
+        # agent = ReActAgent.from_tools(
+        #     [query_engine], llm=self.llm, verbose=True, max_iterations=20
+        # )
+        response = self.run_agent([query_engine], self.llm, rag_query_dto.prompt)
+        self.logger.info(
+            f"END RAG QUERY, hash: {rag_query_dto.file_hash}, prompt: {rag_query_dto.prompt}, response: {str(response)}")
         return RagQueryVO(message=str(response))
-
