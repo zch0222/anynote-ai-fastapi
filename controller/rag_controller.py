@@ -26,7 +26,7 @@ async def query(request: Request, data: RagQueryDTO, service: RagService = Depen
     service.query(data, task_id)
     headers = {
         # 设置返回数据类型是SSE
-        'Content-Type': 'text/event-stream',
+        'Content-Type': 'text/event-stream;charset=UTF-8',
         # 保证客户端的数据是新的
         'Cache-Control': 'no-cache',
     }

@@ -1,4 +1,4 @@
-import uuid
+# import uuid
 
 from llama_index.core import VectorStoreIndex, load_index_from_storage, StorageContext, SimpleDirectoryReader
 from llama_index.core.tools import QueryEngineTool, ToolMetadata
@@ -8,15 +8,16 @@ from llama_index.core.node_parser import SentenceWindowNodeParser
 from llama_index.core.node_parser import SentenceSplitter
 import time
 import json
-from llama_index.embeddings.openai import OpenAIEmbedding
-from llama_index.core.postprocessor import MetadataReplacementPostProcessor
-
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+# from llama_index.embeddings.openai import OpenAIEmbedding
+# from llama_index.core.postprocessor import MetadataReplacementPostProcessor
+#
+# from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+# from llama_index.embeddings.ollama import OllamaEmbedding
 from llama_index.core.agent import AgentRunner, ReActAgent
-from llama_index.agent.openai import OpenAIAgentWorker, OpenAIAgent
-from llama_index.agent.openai import OpenAIAgentWorker
-from core.config import OPENAI_API_KEY
-from core.redis_server import RedisServer
+# from llama_index.agent.openai import OpenAIAgentWorker, OpenAIAgent
+# from llama_index.agent.openai import OpenAIAgentWorker
+# from core.config import OPENAI_API_KEY
+# from core.redis_server import RedisServer
 from model.dto import RagFileIndexDTO, RagQueryDTO
 from utils import download_file
 import os
@@ -25,11 +26,12 @@ from model.dto import FileDownloadDTO
 from exceptions import BusinessException
 from model.vo import RagFileIndexVO, RagQueryVO
 from core.logger import get_logger
-from core.config import RAG_LLM_MODEL
+from core.config import RAG_LLM_MODEL, EMBEDDING_MODEL
 from core.redis_server import RedisServer
-from llama_index.core import Settings
-from core.redis import get_redis_pool
+# from llama_index.core import Settings
+# from core.redis import get_redis_pool
 import asyncio
+# from model.dto import ResData
 
 
 class RagService:
@@ -40,15 +42,23 @@ class RagService:
         else:
             return OpenAI(model=RAG_LLM_MODEL)
 
-    def get_embed_model(self):
-        return HuggingFaceEmbedding(
-            model_name="sentence-transformers/all-mpnet-base-v2", max_length=512
-        )
+    # def get_embed_model(self):
+    #     if "mistral" == EMBEDDING_MODEL:
+    #         return OllamaEmbedding(
+    #             model_name="mistral",
+    #             base_url="http://localhost:11434",
+    #             ollama_additional_kwargs={"mirostat": 0},
+    #         )
+    #     elif "sentence-transformers/all-mpnet-base-v2" == EMBEDDING_MODEL:
+    #         return HuggingFaceEmbedding(
+    #             model_name="sentence-transformers/all-mpnet-base-v2", max_length=512
+    #         )
+    #     return OpenAIEmbedding(embed_batch_size=10)
 
     def __init__(self, redis_server: RedisServer):
         self.redis_server = redis_server
         self.llm = self.get_model()
-        self.embed_model = self.get_embed_model()
+        # self.embed_model = self.get_embed_model()
         self.logger = get_logger()
         # Settings.embed_model = self.get_embed_model()
 
@@ -119,16 +129,18 @@ class RagService:
                 query_engines, llm=llm, max_iterations=20, verbose=True
             )
             response = await agent.achat(prompt)
-            # time.sleep(10)
-            # await asyncio.sleep(85)
+            time.sleep(10)
+            await asyncio.sleep(85)
         except Exception as e:
             self.logger.exception("RAG ERROR")
             self.redis_server.set(f"{RAG_TASK_REDIS_PREFIX}:{task_id}", {
+                "id": task_id,
                 "status": "failed",
                 "result": ""
             })
             raise e
         self.redis_server.set(f"{RAG_TASK_REDIS_PREFIX}:{task_id}", {
+            "id": task_id,
             "status": "finished",
             "result": str(response)
         })
@@ -142,15 +154,17 @@ class RagService:
         #     [query_engine], llm=self.llm, verbose=True, max_iterations=20
         # )
         self.redis_server.set(f"{RAG_TASK_REDIS_PREFIX}:{task_id}", {
+            "id": task_id,
             "status": "running",
             "result": ""
         })
-        asyncio.create_task(self.run_agent([query_engine], self.llm, rag_query_dto.prompt, task_id))
+        prompt = f"{rag_query_dto.prompt}"
+        asyncio.create_task(self.run_agent([query_engine], self.llm, prompt, task_id))
 
     def get_rag_stream(self, task_id: str):
         rag_data = self.redis_server.get(f"{RAG_TASK_REDIS_PREFIX}:{task_id}")
         while rag_data is not None and rag_data["status"] == "running":
-            self.logger.info(f"{json.dumps(rag_data)}")
+            # self.logger.info(f"{json.dumps(rag_data)}")
             yield 'id: {}\nevent: message\ndata: {}\n\n'.format(int(time.time()), json.dumps(rag_data))
             time.sleep(2)
             rag_data = self.redis_server.get(f"{RAG_TASK_REDIS_PREFIX}:{task_id}")
