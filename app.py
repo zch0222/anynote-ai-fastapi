@@ -7,6 +7,7 @@ from starlette.responses import JSONResponse
 from model.dto import ResData
 from exceptions import BusinessException
 from core.redis import get_redis_pool
+from core.config import HOST
 import redis
 
 app = FastAPI()
@@ -53,4 +54,4 @@ async def shutdown_event():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app="app:app", host="127.0.0.1", port=8000, workers=4)
+    uvicorn.run(app="app:app", host=HOST, port=8000, workers=4)
