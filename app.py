@@ -6,6 +6,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from model.dto import ResData
 from exceptions import BusinessException
+from core.redis import get_redis_pool
+import redis
 
 app = FastAPI()
 
@@ -39,8 +41,14 @@ async def exception_handler(request: Request, exc: Exception):
 @app.on_event("startup")
 async def startup_event():
     logger = get_logger()
+    app.state.redis: redis.Redis = get_redis_pool()
     logger.info("fastapi start")
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger = get_logger()
+    app.state.redis.connection_pool.disconnect()
+    logger.info("Redis disconnected")
 
 if __name__ == "__main__":
     import uvicorn

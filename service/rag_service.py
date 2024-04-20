@@ -1,9 +1,13 @@
+import uuid
+
 from llama_index.core import VectorStoreIndex, load_index_from_storage, StorageContext, SimpleDirectoryReader
 from llama_index.core.tools import QueryEngineTool, ToolMetadata
 from llama_index.llms.openai import OpenAI
 from llama_index.llms.ollama import Ollama
 from llama_index.core.node_parser import SentenceWindowNodeParser
 from llama_index.core.node_parser import SentenceSplitter
+import time
+import json
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.core.postprocessor import MetadataReplacementPostProcessor
 
@@ -16,12 +20,16 @@ from core.redis_server import RedisServer
 from model.dto import RagFileIndexDTO, RagQueryDTO
 from utils import download_file
 import os
-from constants.rag_constants import RAG_PDF_DIR, RAG_PERSIST_DIR
+from constants.rag_constants import RAG_PDF_DIR, RAG_PERSIST_DIR, RAG_TASK_REDIS_PREFIX
 from model.dto import FileDownloadDTO
 from exceptions import BusinessException
 from model.vo import RagFileIndexVO, RagQueryVO
 from core.logger import get_logger
 from core.config import RAG_LLM_MODEL
+from core.redis_server import RedisServer
+from llama_index.core import Settings
+from core.redis import get_redis_pool
+import asyncio
 
 
 class RagService:
@@ -37,11 +45,12 @@ class RagService:
             model_name="sentence-transformers/all-mpnet-base-v2", max_length=512
         )
 
-
-    def __init__(self):
+    def __init__(self, redis_server: RedisServer):
+        self.redis_server = redis_server
         self.llm = self.get_model()
         self.embed_model = self.get_embed_model()
         self.logger = get_logger()
+        # Settings.embed_model = self.get_embed_model()
 
     def get_query_engine_tool(self, hash_value: str, file_name: str, author: str, category: str, description: str):
         vector_index_path = f"{RAG_PERSIST_DIR}/{hash_value}"
@@ -54,7 +63,7 @@ class RagService:
 
         query_engine = vector_index.as_query_engine(
             similarity_top_k=2,
-            llm=self.llm,
+            llm=self.llm
             # node_postprocessors=[
             #     MetadataReplacementPostProcessor(target_metadata_key="window")
             # ],
@@ -104,14 +113,27 @@ class RagService:
         self.build_vector_index(file_download_dto)
         return RagFileIndexVO(hash=file_download_dto.hash_value)
 
-    def run_agent(self, query_engines, llm, prompt: str):
-        agent = ReActAgent.from_tools(
-            query_engines, llm=llm, verbose=True, max_iterations=20
-        )
-        response = agent.chat(prompt)
-        return response
+    async def run_agent(self, query_engines, llm, prompt: str, task_id: str):
+        try:
+            agent = ReActAgent.from_tools(
+                query_engines, llm=llm, max_iterations=20, verbose=True
+            )
+            response = await agent.achat(prompt)
+            # time.sleep(10)
+            # await asyncio.sleep(85)
+        except Exception as e:
+            self.logger.exception("RAG ERROR")
+            self.redis_server.set(f"{RAG_TASK_REDIS_PREFIX}:{task_id}", {
+                "status": "failed",
+                "result": ""
+            })
+            raise e
+        self.redis_server.set(f"{RAG_TASK_REDIS_PREFIX}:{task_id}", {
+            "status": "finished",
+            "result": str(response)
+        })
 
-    def query(self, rag_query_dto: RagQueryDTO) -> RagQueryVO:
+    def query(self, rag_query_dto: RagQueryDTO, task_id: str):
         self.logger.info(f"START RAG QUERY, hash: {rag_query_dto.file_hash}, prompt: {rag_query_dto.prompt}")
         query_engine = self.get_query_engine_tool(rag_query_dto.file_hash, rag_query_dto.file_name,
                                                   rag_query_dto.author, rag_query_dto.category,
@@ -119,7 +141,21 @@ class RagService:
         # agent = ReActAgent.from_tools(
         #     [query_engine], llm=self.llm, verbose=True, max_iterations=20
         # )
-        response = self.run_agent([query_engine], self.llm, rag_query_dto.prompt)
+        self.redis_server.set(f"{RAG_TASK_REDIS_PREFIX}:{task_id}", {
+            "status": "running",
+            "result": ""
+        })
+        asyncio.create_task(self.run_agent([query_engine], self.llm, rag_query_dto.prompt, task_id))
+
+    def get_rag_stream(self, task_id: str):
+        rag_data = self.redis_server.get(f"{RAG_TASK_REDIS_PREFIX}:{task_id}")
+        while rag_data is not None and rag_data["status"] == "running":
+            self.logger.info(f"{json.dumps(rag_data)}")
+            yield 'id: {}\nevent: message\ndata: {}\n\n'.format(int(time.time()), json.dumps(rag_data))
+            time.sleep(2)
+            rag_data = self.redis_server.get(f"{RAG_TASK_REDIS_PREFIX}:{task_id}")
+
+        yield 'id: {}\nevent: message\ndata: {}\n\n'.format(int(time.time()), json.dumps(rag_data))
         self.logger.info(
-            f"END RAG QUERY, hash: {rag_query_dto.file_hash}, prompt: {rag_query_dto.prompt}, response: {str(response)}")
-        return RagQueryVO(message=str(response))
+            f"END RAG QUERY, task_id: {task_id}, "
+            f"status: {rag_data['status']}, response: {rag_data['result']}")
