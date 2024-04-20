@@ -2,6 +2,12 @@ from llama_index.core import VectorStoreIndex, load_index_from_storage, StorageC
 from llama_index.core.tools import QueryEngineTool, ToolMetadata
 from llama_index.llms.openai import OpenAI
 from llama_index.llms.ollama import Ollama
+from llama_index.core.node_parser import SentenceWindowNodeParser
+from llama_index.core.node_parser import SentenceSplitter
+from llama_index.embeddings.openai import OpenAIEmbedding
+from llama_index.core.postprocessor import MetadataReplacementPostProcessor
+
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.core.agent import AgentRunner, ReActAgent
 from llama_index.agent.openai import OpenAIAgentWorker, OpenAIAgent
 from llama_index.agent.openai import OpenAIAgentWorker
@@ -26,8 +32,15 @@ class RagService:
         else:
             return OpenAI(model=RAG_LLM_MODEL)
 
+    def get_embed_model(self):
+        return HuggingFaceEmbedding(
+            model_name="sentence-transformers/all-mpnet-base-v2", max_length=512
+        )
+
+
     def __init__(self):
         self.llm = self.get_model()
+        self.embed_model = self.get_embed_model()
         self.logger = get_logger()
 
     def get_query_engine_tool(self, hash_value: str, file_name: str, author: str, category: str, description: str):
@@ -39,7 +52,13 @@ class RagService:
             StorageContext.from_defaults(persist_dir=vector_index_path),
         )
 
-        query_engine = vector_index.as_query_engine(similarity_top_k=3, llm=self.llm)
+        query_engine = vector_index.as_query_engine(
+            similarity_top_k=2,
+            llm=self.llm,
+            # node_postprocessors=[
+            #     MetadataReplacementPostProcessor(target_metadata_key="window")
+            # ],
+        )
         query_engine_tool = QueryEngineTool(
             query_engine=query_engine,
             metadata=ToolMetadata(
@@ -55,12 +74,25 @@ class RagService:
     def load_documents(self, file_paths: list[str]):
         return SimpleDirectoryReader(input_files=file_paths).load_data()
 
+    def get_node_parser(self):
+        return SentenceWindowNodeParser.from_defaults(
+            window_size=3,
+            window_metadata_key="window",
+            original_text_metadata_key="original_text"
+        )
+
+    def get_base_node_parser(self):
+        return SentenceSplitter()
+
     def build_vector_index(self, file_download_dto: FileDownloadDTO):
 
         vector_index_path = f"{RAG_PERSIST_DIR}/{file_download_dto.hash_value}"
         if not os.path.exists(vector_index_path):
             self.logger.info(f"Start index: {vector_index_path}")
-            vector_index = VectorStoreIndex.from_documents(self.load_documents([file_download_dto.file_path]))
+            node_parser = self.get_base_node_parser()
+            documents = self.load_documents([file_download_dto.file_path])
+            nodes = node_parser.get_nodes_from_documents(documents)
+            vector_index = VectorStoreIndex(nodes)
             vector_index.storage_context.persist(persist_dir=vector_index_path)
         return vector_index_path
 
