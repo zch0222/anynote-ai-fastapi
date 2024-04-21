@@ -129,8 +129,6 @@ class RagService:
                 query_engines, llm=llm, max_iterations=20, verbose=True
             )
             response = await agent.achat(prompt)
-            time.sleep(10)
-            await asyncio.sleep(85)
         except Exception as e:
             self.logger.exception("RAG ERROR")
             self.redis_server.set(f"{RAG_TASK_REDIS_PREFIX}:{task_id}", {
@@ -158,7 +156,7 @@ class RagService:
             "status": "running",
             "result": ""
         })
-        prompt = f"{rag_query_dto.prompt}"
+        prompt = f"请使用markdown格式回答我的问题，以下是我的问题：{rag_query_dto.prompt}"
         asyncio.create_task(self.run_agent([query_engine], self.llm, prompt, task_id))
 
     def get_rag_stream(self, task_id: str):
