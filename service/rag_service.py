@@ -8,7 +8,7 @@ from llama_index.core.node_parser import SentenceWindowNodeParser
 from llama_index.core.node_parser import SentenceSplitter
 import time
 import json
-# from llama_index.embeddings.openai import OpenAIEmbedding
+from llama_index.embeddings.openai import OpenAIEmbedding
 # from llama_index.core.postprocessor import MetadataReplacementPostProcessor
 #
 # from llama_index.embeddings.huggingface import HuggingFaceEmbedding
@@ -28,7 +28,7 @@ from model.vo import RagFileIndexVO, RagQueryVO
 from core.logger import get_logger
 from core.config import RAG_LLM_MODEL, EMBEDDING_MODEL
 from core.redis_server import RedisServer
-# from llama_index.core import Settings
+from llama_index.core import Settings
 # from core.redis import get_redis_pool
 import asyncio
 # from model.dto import ResData
@@ -42,25 +42,28 @@ class RagService:
         else:
             return OpenAI(model=RAG_LLM_MODEL)
 
-    # def get_embed_model(self):
-    #     if "mistral" == EMBEDDING_MODEL:
-    #         return OllamaEmbedding(
-    #             model_name="mistral",
-    #             base_url="http://localhost:11434",
-    #             ollama_additional_kwargs={"mirostat": 0},
-    #         )
-    #     elif "sentence-transformers/all-mpnet-base-v2" == EMBEDDING_MODEL:
-    #         return HuggingFaceEmbedding(
-    #             model_name="sentence-transformers/all-mpnet-base-v2", max_length=512
-    #         )
-    #     return OpenAIEmbedding(embed_batch_size=10)
+    def get_embed_model(self):
+        # if "mistral" == EMBEDDING_MODEL:
+        #     return OllamaEmbedding(
+        #         model_name="mistral",
+        #         base_url="http://localhost:11434",
+        #         ollama_additional_kwargs={"mirostat": 0},
+        #     )
+        # elif "sentence-transformers/all-mpnet-base-v2" == EMBEDDING_MODEL:
+        #     return HuggingFaceEmbedding(
+        #         model_name="sentence-transformers/all-mpnet-base-v2", max_length=512
+        #     )
+        if EMBEDDING_MODEL is not None:
+            print(EMBEDDING_MODEL)
+            return OpenAIEmbedding(model_name=EMBEDDING_MODEL)
+        return OpenAIEmbedding(model_name="text-embedding-ada-002")
 
     def __init__(self, redis_server: RedisServer):
         self.redis_server = redis_server
         self.llm = self.get_model()
         # self.embed_model = self.get_embed_model()
         self.logger = get_logger()
-        # Settings.embed_model = self.get_embed_model()
+        Settings.embed_model = self.get_embed_model()
 
     def get_query_engine_tool(self, hash_value: str, file_name: str, author: str, category: str, description: str):
         vector_index_path = f"{RAG_PERSIST_DIR}/{hash_value}"
