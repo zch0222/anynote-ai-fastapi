@@ -11,7 +11,7 @@ import json
 from llama_index.embeddings.openai import OpenAIEmbedding
 # from llama_index.core.postprocessor import MetadataReplacementPostProcessor
 #
-# from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 # from llama_index.embeddings.ollama import OllamaEmbedding
 from llama_index.core.agent import AgentRunner, ReActAgent
 # from llama_index.agent.openai import OpenAIAgentWorker, OpenAIAgent
@@ -39,6 +39,8 @@ class RagService:
     def get_model(self):
         if "mistral" == RAG_LLM_MODEL:
             return Ollama(model="mistral", request_timeout=300.0)
+        elif "llama3" == RAG_LLM_MODEL:
+            return Ollama(model="llama3", request_timeout=300.0)
         else:
             return OpenAI(model=RAG_LLM_MODEL)
 
@@ -53,6 +55,10 @@ class RagService:
         #     return HuggingFaceEmbedding(
         #         model_name="sentence-transformers/all-mpnet-base-v2", max_length=512
         #     )
+        if "BAAI/bge-small-zh-v1.5" == EMBEDDING_MODEL:
+            self.logger.info("Using BAAI/bge-small")
+            return HuggingFaceEmbedding(model_name=EMBEDDING_MODEL)
+
         if EMBEDDING_MODEL is not None:
             print(EMBEDDING_MODEL)
             return OpenAIEmbedding(model_name=EMBEDDING_MODEL)
