@@ -26,7 +26,7 @@ from model.dto import FileDownloadDTO
 from exceptions import BusinessException
 from model.vo import RagFileIndexVO, RagQueryVO
 from core.logger import get_logger
-from core.config import RAG_LLM_MODEL, EMBEDDING_MODEL
+from core.config import RAG_LLM_MODEL, EMBEDDING_MODEL, BASE_PROMPT
 from core.redis_server import RedisServer
 from llama_index.core import Settings
 # from core.redis import get_redis_pool
@@ -165,13 +165,14 @@ class RagService:
             "status": "running",
             "result": ""
         })
-        prompt = f"请使用markdown格式回答我的问题，以下是我的问题：{rag_query_dto.prompt}"
+        prompt = f"{BASE_PROMPT}{rag_query_dto.prompt}"
+        self.logger.info(prompt)
         asyncio.create_task(self.run_agent([query_engine], self.llm, prompt, task_id))
 
     def get_rag_stream(self, task_id: str):
         rag_data = self.redis_server.get(f"{RAG_TASK_REDIS_PREFIX}:{task_id}")
         while rag_data is not None and rag_data["status"] == "running":
-            # self.logger.info(f"{json.dumps(rag_data)}")
+            self.logger.info(f"{json.dumps(rag_data)}")
             yield 'id: {}\nevent: message\ndata: {}\n\n'.format(int(time.time()), json.dumps(rag_data))
             time.sleep(2)
             rag_data = self.redis_server.get(f"{RAG_TASK_REDIS_PREFIX}:{task_id}")
