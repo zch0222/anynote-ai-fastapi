@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from core.logger import get_logger
 from controller.rag_controller import rag_router
+from controller.data_connect_controller import data_connect_router
 from controller.pandas_controller import pandas_router
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -15,6 +16,7 @@ app = FastAPI()
 # 路由
 app.include_router(rag_router)
 app.include_router(pandas_router)
+app.include_router(data_connect_router)
 
 
 # 业务异常处理

@@ -9,7 +9,8 @@ from llama_index.core.node_parser import SentenceSplitter
 import time
 import json
 from llama_index.embeddings.openai import OpenAIEmbedding
-# from llama_index.core.postprocessor import MetadataReplacementPostProcessor
+from llama_index.readers.github import GithubRepositoryReader, GithubClient
+from llama_index.core.postprocessor import MetadataReplacementPostProcessor
 #
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 # from llama_index.embeddings.ollama import OllamaEmbedding
@@ -22,11 +23,11 @@ from model.dto import RagFileIndexDTO, RagQueryDTO
 from utils import download_file
 import os
 from constants.rag_constants import RAG_PDF_DIR, RAG_PERSIST_DIR, RAG_TASK_REDIS_PREFIX
-from model.dto import FileDownloadDTO
+from model.dto import FileDownloadDTO, RagGithubDTO
 from exceptions import BusinessException
 from model.vo import RagFileIndexVO, RagQueryVO
 from core.logger import get_logger
-from core.config import RAG_LLM_MODEL, EMBEDDING_MODEL, BASE_PROMPT
+from core.config import RAG_LLM_MODEL, EMBEDDING_MODEL, BASE_PROMPT, GITHUB_TOKEN
 from core.redis_server import RedisServer
 from llama_index.core import Settings
 # from core.redis import get_redis_pool
@@ -44,7 +45,7 @@ class RagService:
         else:
             return OpenAI(model=RAG_LLM_MODEL)
 
-    def get_embed_model(self):
+    def get_embed_model(self, model: str):
         # if "mistral" == EMBEDDING_MODEL:
         #     return OllamaEmbedding(
         #         model_name="mistral",
@@ -55,13 +56,13 @@ class RagService:
         #     return HuggingFaceEmbedding(
         #         model_name="sentence-transformers/all-mpnet-base-v2", max_length=512
         #     )
-        if "BAAI/bge-small-zh-v1.5" == EMBEDDING_MODEL:
+        if "BAAI/bge-small-zh-v1.5" == model:
             self.logger.info("Using BAAI/bge-small")
-            return HuggingFaceEmbedding(model_name=EMBEDDING_MODEL)
+            return HuggingFaceEmbedding(model_name=model)
 
-        if EMBEDDING_MODEL is not None:
+        if model is not None:
             print(EMBEDDING_MODEL)
-            return OpenAIEmbedding(model_name=EMBEDDING_MODEL)
+            return OpenAIEmbedding(model_name=model)
         return OpenAIEmbedding(model_name="text-embedding-ada-002")
 
     def __init__(self, redis_server: RedisServer):
@@ -69,7 +70,7 @@ class RagService:
         self.llm = self.get_model()
         # self.embed_model = self.get_embed_model()
         self.logger = get_logger()
-        Settings.embed_model = self.get_embed_model()
+        Settings.embed_model = self.get_embed_model(EMBEDDING_MODEL)
 
     def get_query_engine_tool(self, hash_value: str, file_name: str, author: str, category: str, description: str):
         vector_index_path = f"{RAG_PERSIST_DIR}/{hash_value}"
@@ -81,11 +82,11 @@ class RagService:
         )
 
         query_engine = vector_index.as_query_engine(
-            similarity_top_k=2,
-            llm=self.llm
-            # node_postprocessors=[
-            #     MetadataReplacementPostProcessor(target_metadata_key="window")
-            # ],
+            similarity_top_k=10,
+            llm=self.llm,
+            node_postprocessors=[
+                MetadataReplacementPostProcessor(target_metadata_key="window")
+            ],
         )
         query_engine_tool = QueryEngineTool(
             query_engine=query_engine,
@@ -95,7 +96,7 @@ class RagService:
                     f"file name is {file_name}, author is {author}, category is {category}, {description}"
                     f"{file_name}"
                 ),
-            ),
+            )
         )
         return query_engine_tool
 
@@ -117,7 +118,7 @@ class RagService:
         vector_index_path = f"{RAG_PERSIST_DIR}/{file_download_dto.hash_value}"
         if not os.path.exists(vector_index_path):
             self.logger.info(f"Start index: {vector_index_path}")
-            node_parser = self.get_base_node_parser()
+            node_parser = self.get_node_parser()
             documents = self.load_documents([file_download_dto.file_path])
             nodes = node_parser.get_nodes_from_documents(documents)
             vector_index = VectorStoreIndex(nodes)
@@ -125,6 +126,7 @@ class RagService:
         return vector_index_path
 
     def index_pdf(self, rag_file_index_dto: RagFileIndexDTO) -> RagFileIndexVO:
+        # Settings.embed_model = self.get_embed_model(EMBEDDING_MODEL)
         self.logger.info(f"Start indexing: {rag_file_index_dto.file_path}")
         file_download_dto = download_file(rag_file_index_dto.file_path, RAG_PDF_DIR)
         if not file_download_dto:
@@ -181,3 +183,21 @@ class RagService:
         self.logger.info(
             f"END RAG QUERY, task_id: {task_id}, "
             f"status: {rag_data['status']}, response: {rag_data['result']}")
+
+    def query_github(self, rag_github_dto: RagGithubDTO):
+        # Settings.embed_model = self.get_embed_model(EMBEDDING_MODEL)
+        documents = GithubRepositoryReader(
+            github_client=GithubClient(github_token=GITHUB_TOKEN),
+            owner=rag_github_dto.owner,
+            repo=rag_github_dto.repo,
+            use_parser=False,
+            verbose=False,
+        ).load_data(branch=rag_github_dto.branch)
+        index = VectorStoreIndex.from_documents(documents)
+        query_engine = index.as_query_engine()
+        response = query_engine.query(
+            rag_github_dto.prompt,
+            verbose=True,
+        )
+        return RagQueryVO(message=str(response))
+

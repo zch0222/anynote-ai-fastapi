@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Request
 
 from service.rag_service import RagService
-from model.dto import RagFileIndexDTO, ResData, RagQueryDTO
+from model.dto import RagFileIndexDTO, ResData, RagQueryDTO, RagGithubDTO
 from core.redis_server import RedisServer
 from fastapi.responses import StreamingResponse
 import uuid
@@ -17,6 +17,11 @@ def get_rag_service(request: Request) -> RagService:
 def index(request: Request, data: RagFileIndexDTO, service: RagService = Depends(get_rag_service)):
     rag_file_index_vo = service.index_pdf(data)
     return ResData.success(rag_file_index_vo.to_dict())
+
+
+@rag_router.post("/api/rag/github")
+def rag_github(request: Request, data: RagGithubDTO, service: RagService = Depends(get_rag_service)):
+    return ResData.success(service.query_github(data).to_dict())
 
 
 @rag_router.post("/api/rag/query")
