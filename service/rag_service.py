@@ -23,17 +23,16 @@ from model.dto import RagFileIndexDTO, RagQueryDTO
 from utils import download_file
 import os
 from constants.rag_constants import RAG_PDF_DIR, RAG_PERSIST_DIR, RAG_TASK_REDIS_PREFIX
-from model.dto import FileDownloadDTO, RagGithubDTO
+from model.dto import FileDownloadDTO, GithubQueryDTO
 from exceptions import BusinessException
 from model.vo import RagFileIndexVO, RagQueryVO
 from core.logger import get_logger
-from core.config import RAG_LLM_MODEL, EMBEDDING_MODEL, BASE_PROMPT, GITHUB_TOKEN
+from core.config import RAG_LLM_MODEL, RAG_EMBEDDING_MODEL, BASE_PROMPT, GITHUB_TOKEN
 from core.redis_server import RedisServer
-from llama_index.core import Settings
+from llama_index.core import Settings, ServiceContext
 # from core.redis import get_redis_pool
 import asyncio
 # from model.dto import ResData
-
 
 class RagService:
 
@@ -59,9 +58,12 @@ class RagService:
         if "BAAI/bge-small-zh-v1.5" == model:
             self.logger.info("Using BAAI/bge-small")
             return HuggingFaceEmbedding(model_name=model)
+        elif "BAAI/bge-small-en-v1.5" == model:
+            self.logger.info("BAAI/bge-small-en-v1.5")
+            return HuggingFaceEmbedding(model_name=model)
 
         if model is not None:
-            print(EMBEDDING_MODEL)
+            print(RAG_EMBEDDING_MODEL)
             return OpenAIEmbedding(model_name=model)
         return OpenAIEmbedding(model_name="text-embedding-ada-002")
 
@@ -70,7 +72,7 @@ class RagService:
         self.llm = self.get_model()
         # self.embed_model = self.get_embed_model()
         self.logger = get_logger()
-        Settings.embed_model = self.get_embed_model(EMBEDDING_MODEL)
+        Settings.embed_model = self.get_embed_model(RAG_EMBEDDING_MODEL)
 
     def get_query_engine_tool(self, hash_value: str, file_name: str, author: str, category: str, description: str):
         vector_index_path = f"{RAG_PERSIST_DIR}/{hash_value}"
@@ -78,7 +80,7 @@ class RagService:
             raise BusinessException("文件索引不存在")
 
         vector_index = load_index_from_storage(
-            StorageContext.from_defaults(persist_dir=vector_index_path),
+            StorageContext.from_defaults(persist_dir=vector_index_path)
         )
 
         query_engine = vector_index.as_query_engine(
@@ -184,20 +186,22 @@ class RagService:
             f"END RAG QUERY, task_id: {task_id}, "
             f"status: {rag_data['status']}, response: {rag_data['result']}")
 
-    def query_github(self, rag_github_dto: RagGithubDTO):
+    def query_github(self, rag_github_dto: GithubQueryDTO):
         # Settings.embed_model = self.get_embed_model(EMBEDDING_MODEL)
         documents = GithubRepositoryReader(
             github_client=GithubClient(github_token=GITHUB_TOKEN),
             owner=rag_github_dto.owner,
             repo=rag_github_dto.repo,
             use_parser=False,
-            verbose=False,
+            verbose=True,
         ).load_data(branch=rag_github_dto.branch)
-        index = VectorStoreIndex.from_documents(documents)
+        index = VectorStoreIndex.from_documents(documents, service_context=ServiceContext
+                                                .from_defaults(embed_model=HuggingFaceEmbedding("BAAI/bge-small-en-v1.5")))
         query_engine = index.as_query_engine()
         response = query_engine.query(
             rag_github_dto.prompt,
-            verbose=True,
+            # verbose=True,
+
         )
         return RagQueryVO(message=str(response))
 

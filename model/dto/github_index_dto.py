@@ -1,8 +1,7 @@
 from pydantic import BaseModel
 
 
-class RagGithubDTO(BaseModel):
+class GithubIndexDTO(BaseModel):
     owner: str
     repo: str
     branch: str
-    prompt: str
