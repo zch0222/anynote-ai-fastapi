@@ -67,8 +67,8 @@ class RagService:
             return OpenAIEmbedding(model_name=model)
         return OpenAIEmbedding(model_name="text-embedding-ada-002")
 
-    def __init__(self, redis_server: RedisServer):
-        self.redis_server = redis_server
+    def __init__(self):
+        # self.redis_server = redis_server
         self.llm = self.get_model()
         # self.embed_model = self.get_embed_model()
         self.logger = get_logger()
@@ -136,47 +136,53 @@ class RagService:
         self.build_vector_index(file_download_dto)
         return RagFileIndexVO(hash=file_download_dto.hash_value)
 
-    async def run_agent(self, query_engines, llm, prompt: str, task_id: str):
-        try:
-            agent = ReActAgent.from_tools(
-                query_engines, llm=llm, max_iterations=20, verbose=True
-            )
-            response = await agent.achat(prompt)
-        except Exception as e:
-            self.logger.exception("RAG ERROR")
-            self.redis_server.set(f"{RAG_TASK_REDIS_PREFIX}:{task_id}", {
-                "id": task_id,
-                "status": "failed",
-                "result": ""
-            })
-            raise e
-        self.redis_server.set(f"{RAG_TASK_REDIS_PREFIX}:{task_id}", {
-            "id": task_id,
-            "status": "finished",
-            "result": str(response)
-        })
+    def run_agent(self, query_engines, llm, prompt: str, task_id: str):
+        # try:
+        #     agent = ReActAgent.from_tools(
+        #         query_engines, llm=llm, max_iterations=20, verbose=True
+        #     )
+        #     response = agent.achat(prompt)
+        # except Exception as e:
+        #     self.logger.exception("RAG ERROR")
+        #     self.redis_server.set(f"{RAG_TASK_REDIS_PREFIX}:{task_id}", {
+        #         "id": task_id,
+        #         "status": "failed",
+        #         "result": ""
+        #     })
+        #     raise e
+        # self.redis_server.set(f"{RAG_TASK_REDIS_PREFIX}:{task_id}", {
+        #     "id": task_id,
+        #     "status": "finished",
+        #     "result": str(response)
+        # })
+        agent = ReActAgent.from_tools(
+            query_engines, llm=llm, max_iterations=20, verbose=True
+        )
+        response = agent.chat(prompt)
+        print(str(response))
 
     def query(self, rag_query_dto: RagQueryDTO, task_id: str):
         self.logger.info(f"START RAG QUERY, hash: {rag_query_dto.file_hash}, prompt: {rag_query_dto.prompt}")
         query_engine = self.get_query_engine_tool(rag_query_dto.file_hash, rag_query_dto.file_name,
                                                   rag_query_dto.author, rag_query_dto.category,
                                                   rag_query_dto.description)
-        # agent = ReActAgent.from_tools(
-        #     [query_engine], llm=self.llm, verbose=True, max_iterations=20
-        # )
-        self.redis_server.set(f"{RAG_TASK_REDIS_PREFIX}:{task_id}", {
-            "id": task_id,
-            "status": "running",
-            "result": ""
-        })
-        prompt = f"{BASE_PROMPT}{rag_query_dto.prompt}"
-        self.logger.info(prompt)
-        asyncio.create_task(self.run_agent([query_engine], self.llm, prompt, task_id))
+        # # agent = ReActAgent.from_tools(
+        # #     [query_engine], llm=self.llm, verbose=True, max_iterations=20
+        # # )
+        # self.redis_server.set(f"{RAG_TASK_REDIS_PREFIX}:{task_id}", {
+        #     "id": task_id,
+        #     "status": "running",
+        #     "result": ""
+        # })
+        # prompt = f"{BASE_PROMPT}{rag_query_dto.prompt}"
+        # self.logger.info(prompt)
+        # asyncio.create_task()
+        self.run_agent([query_engine], self.llm, f"{BASE_PROMPT}{rag_query_dto.prompt}", task_id)
 
     def get_rag_stream(self, task_id: str):
         rag_data = self.redis_server.get(f"{RAG_TASK_REDIS_PREFIX}:{task_id}")
         while rag_data is not None and rag_data["status"] == "running":
-            # self.logger.info(f"{json.dumps(rag_data)}")
+            self.logger.info(f"{json.dumps(rag_data)}")
             yield 'id: {}\nevent: message\ndata: {}\n\n'.format(int(time.time()), json.dumps(rag_data))
             time.sleep(2)
             rag_data = self.redis_server.get(f"{RAG_TASK_REDIS_PREFIX}:{task_id}")
@@ -205,3 +211,17 @@ class RagService:
         )
         return RagQueryVO(message=str(response))
 
+if __name__ == "__main__":
+    dto = RagQueryDTO(file_hash="550784ccb52cbbb5ec3f38cf411aecfe0dcf8617e22dad6d2db43bfff8bf5c30",
+                      prompt = "java命名需要注意什么", author = "UNKNOWN", category = "UNKNOWN", description = "NO", file_name = "JAVA")
+    # dto.file_hash = "550784ccb52cbbb5ec3f38cf411aecfe0dcf8617e22dad6d2db43bfff8bf5c30"
+    # dto.prompt = "java命名需要注意什么"
+    # dto.author = "UNKNOWN"
+    # dto.category = "UNKNOWN"
+    # dto.description = "NO"
+    # dto.file_name = "JAVA"
+    print(time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())))
+
+    RagService().query(dto, "aaa")
+
+    print(time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())))

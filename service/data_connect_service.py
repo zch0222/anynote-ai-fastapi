@@ -1,5 +1,7 @@
 import os.path
 
+from llama_index.embeddings.openai import OpenAIEmbedding
+
 from core.redis_server import RedisServer
 from model.dto import GithubIndexDTO, GithubQueryDTO
 from model.vo import GithubQueryVO
@@ -10,13 +12,36 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from constants.data_connect_constants import GITHUB_PERSIST_DIR
 from exceptions import BusinessException
 from llama_index.core.node_parser import SentenceSplitter
+from core.config import CODE_EMBEDDING_MODEL
 
 
 class DataConnectService:
 
+    def get_embed_model(self, model: str):
+        # if "mistral" == EMBEDDING_MODEL:
+        #     return OllamaEmbedding(
+        #         model_name="mistral",
+        #         base_url="http://localhost:11434",
+        #         ollama_additional_kwargs={"mirostat": 0},
+        #     )
+        # elif "sentence-transformers/all-mpnet-base-v2" == EMBEDDING_MODEL:
+        #     return HuggingFaceEmbedding(
+        #         model_name="sentence-transformers/all-mpnet-base-v2", max_length=512
+        #     )
+        if "BAAI/bge-small-zh-v1.5" == model:
+            self.logger.info("Using BAAI/bge-small")
+            return HuggingFaceEmbedding(model_name=model)
+        elif "BAAI/bge-small-en-v1.5" == model:
+            self.logger.info("BAAI/bge-small-en-v1.5")
+            return HuggingFaceEmbedding(model_name=model)
+
+        if model is not None:
+            return OpenAIEmbedding(model_name=model)
+        return OpenAIEmbedding(model_name="text-embedding-ada-002")
+
     def __init__(self, redis_server: RedisServer):
         self.redis_server = redis_server
-        Settings.embed_model = HuggingFaceEmbedding("BAAI/bge-small-en-v1.5")
+        Settings.embed_model = self.get_embed_model(CODE_EMBEDDING_MODEL)
         pass
 
     def get_base_node_parser(self):
@@ -36,7 +61,7 @@ class DataConnectService:
         #                                         .from_defaults(
         #     embed_model=HuggingFaceEmbedding("BAAI/bge-small-en-v1.5")))
         index = VectorStoreIndex(nodes, service_context=ServiceContext
-                                 .from_defaults(embed_model=HuggingFaceEmbedding("BAAI/bge-small-en-v1.5")))
+                                 .from_defaults(embed_model=self.get_embed_model(CODE_EMBEDDING_MODEL)))
         index.storage_context.persist(
             persist_dir=f"{GITHUB_PERSIST_DIR}/{github_index_dto.owner}/{github_index_dto.repo}/{github_index_dto.branch}")
 
