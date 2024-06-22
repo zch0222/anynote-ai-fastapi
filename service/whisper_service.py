@@ -2,7 +2,8 @@ import json
 import os
 import torch
 import uuid
-from core.config import WHISPER_MODEL
+from core.config import WHISPER_MODEL, ROCKETMQ_TOPIC
+from constants.rocketmq_tags_constants import WHISPER_TASK_STATUS_UPDATED
 import whisper
 from model.dto import WhisperRunDTO
 from model.vo import WhisperRunVO, WhisperSubmitVO
@@ -11,6 +12,7 @@ from constants.whisper_constants import WHISPER_MEDIA_DIR, WHISPER_MEDIA_AUDIO_D
 import datetime
 from core.minio_server import MinioServer
 from core.aio_redis_server import AIORedisServer
+from core.rocketmq_server import RocketMQServer
 from constants.redis_channel_constants import WHISPER_STATUS_CHANNEL
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures import ThreadPoolExecutor
@@ -54,6 +56,9 @@ class WhisperService:
     async def run_whisper(self, whisper_run_dto: WhisperRunDTO, channel: str):
         print(self.device)
         model = whisper.load_model(WHISPER_MODEL).to(self.device)
+        RocketMQServer().send(ROCKETMQ_TOPIC, WHISPER_TASK_STATUS_UPDATED, {
+            "status": "downloading"
+        })
         audio_file = download_file(whisper_run_dto.url, WHISPER_MEDIA_DIR)
         # audio_path = f"{WHISPER_MEDIA_AUDIO_DIR}/{audio_file.hash_value}.mp3"
         # extract_sound(audio_file.file_path, audio_path)
@@ -67,6 +72,9 @@ class WhisperService:
         await AIORedisServer().publish(channel, {
             "status": "running"
         })
+        RocketMQServer().send(ROCKETMQ_TOPIC, WHISPER_TASK_STATUS_UPDATED, {
+            "status": "running"
+        })
         result = model.transcribe(audio_file.file_path, language=whisper_run_dto.language)
         srt_file = f"{WHISPER_SRT_DIR}/{audio_file.hash_value}.srt"
         txt_file = f"{WHISPER_TXT_DIR}/{audio_file.hash_value}.txt"
@@ -75,6 +83,12 @@ class WhisperService:
         srt_url = self.minio_server.upload(srt_file, f"{WHISPER_MINIO_SRT_DIR}/{audio_file.hash_value}.srt")
         txt_url = self.minio_server.upload(txt_file, f"{WHISPER_MINIO_TXT_DIR}/{audio_file.hash_value}.txt")
         # print(json.dumps(result, indent=2))
+        RocketMQServer().send(ROCKETMQ_TOPIC, WHISPER_TASK_STATUS_UPDATED, {
+            "status": "finished",
+            "data": WhisperRunVO(text=result["text"],
+                                    srt=srt_url,
+                                    txt=txt_url).to_dict()
+        })
         await AIORedisServer().publish(channel, {
             "status": "finished",
             "data": WhisperRunVO(text=result["text"],
