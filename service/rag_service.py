@@ -41,6 +41,10 @@ class RagService:
             return Ollama(model="mistral", request_timeout=300.0)
         elif "llama3" == RAG_LLM_MODEL:
             return Ollama(model="llama3", request_timeout=300.0)
+        elif "qwen2" == RAG_LLM_MODEL:
+            return Ollama(model="qwen2", request_timeout=300.0)
+        elif "gemma" == RAG_LLM_MODEL:
+            return Ollama(model="gemma", request_timeout=300.0)
         else:
             return OpenAI(model=RAG_LLM_MODEL)
 
@@ -149,12 +153,21 @@ class RagService:
                 "status": "failed",
                 "result": ""
             })
-            raise e
+            return {
+                "id": task_id,
+                "status": "failed",
+                "result": ""
+            }
         self.redis_server.set(f"{RAG_TASK_REDIS_PREFIX}:{task_id}", {
             "id": task_id,
             "status": "finished",
             "result": str(response)
         })
+        return {
+            "id": task_id,
+            "status": "finished",
+            "result": str(response)
+        }
 
     def query(self, rag_query_dto: RagQueryDTO, task_id: str):
         self.logger.info(f"START RAG QUERY, hash: {rag_query_dto.file_hash}, prompt: {rag_query_dto.prompt}")
@@ -173,8 +186,74 @@ class RagService:
         self.logger.info(prompt)
         asyncio.create_task(self.run_agent([query_engine], self.llm, prompt, task_id))
 
+    async def send_heartbeat(self, task_id: str):
+        while True:
+            self.logger.info(f"taskid: {task_id}, heartbeat")
+            yield 'id: {}\nevent: message\ndata: {}\n\n'.format(int(time.time()), json.dumps({
+                "id": task_id,
+                "status": "running",
+                "result": ""
+            }))
+            await asyncio.sleep(5)
+
+    async def run_agent_v2(self, query_engines, llm, prompt: str, task_id: str):
+        try:
+            agent = ReActAgent.from_tools(
+                query_engines, llm=llm, max_iterations=20, verbose=True
+            )
+            response = await agent.achat(prompt)
+        except Exception as e:
+            self.logger.exception("RAG ERROR")
+            self.redis_server.set(f"{RAG_TASK_REDIS_PREFIX}:{task_id}", {
+                "id": task_id,
+                "status": "failed",
+                "result": ""
+            })
+            return {
+                "id": task_id,
+                "status": "failed",
+                "result": ""
+            }
+        self.redis_server.set(f"{RAG_TASK_REDIS_PREFIX}:{task_id}", {
+            "id": task_id,
+            "status": "finished",
+            "result": str(response)
+        })
+        return {
+            "id": task_id,
+            "status": "finished",
+            "result": str(response)
+        }
+
+    async def query_v2(self, rag_query_dto: RagQueryDTO, task_id: str):
+        query_engine = self.get_query_engine_tool(rag_query_dto.file_hash, rag_query_dto.file_name,
+                                                  rag_query_dto.author, rag_query_dto.category,
+                                                  rag_query_dto.description)
+        prompt = f"{BASE_PROMPT}{rag_query_dto.prompt}"
+        yield 'id: {}\nevent: message\ndata: {}\n\n'.format(int(time.time()), json.dumps({
+            "id": task_id,
+            "status": "running",
+            "result": ""
+        }))
+        # 创建一个任务来发送心跳
+        heartbeat_task = asyncio.create_task(self.send_heartbeat(task_id))
+        try:
+            res = await self.run_agent_v2([query_engine], self.llm, prompt, task_id)
+        finally:
+            # 当run_agent_v2返回时，取消心跳任务
+            heartbeat_task.cancel()
+            try:
+                # 等待心跳任务被取消
+                await heartbeat_task
+            except asyncio.CancelledError:
+                # 忽略取消任务引发的异常
+                pass
+        # yield 'id: {}\nevent: message\ndata: {}\n\n'.format(int(time.time()), json.dumps(res))
+
+
     def get_rag_stream(self, task_id: str):
         rag_data = self.redis_server.get(f"{RAG_TASK_REDIS_PREFIX}:{task_id}")
+        yield 'id: {}\nevent: message\ndata: {}\n\n'.format(int(time.time()), json.dumps(rag_data))
         while rag_data is not None and rag_data["status"] == "running":
             # self.logger.info(f"{json.dumps(rag_data)}")
             yield 'id: {}\nevent: message\ndata: {}\n\n'.format(int(time.time()), json.dumps(rag_data))

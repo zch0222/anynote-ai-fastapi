@@ -4,6 +4,7 @@ from redis.lock import Lock
 import traceback
 from time import sleep
 import json
+import time
 
 
 class RedisServer:
@@ -96,3 +97,26 @@ class RedisServer:
 
     def get_read_count(self, key: str) -> int:
         return int(self.redis.get(f"{RedisServer.READ_COUNT_PREFIX}{key}"))
+
+    def publish(self, channel: str, message):
+        self.redis.publish(channel, json.dumps(message))
+
+    def subscribe(self, channel: str, message_handler):
+        """
+        订阅给定的频道并处理消息。
+
+        :param channel: 要订阅的频道名称
+        :param message_handler: 处理消息的函数，该函数需要接收消息数据作为参数
+        """
+
+        # 创建 pubsub 实例
+        pubsub = self.redis.pubsub()
+        pubsub.subscribe(channel)
+        # 处理接收到的消息
+        print(f"Subscribed to {channel}, waiting for messages...")
+        while True:
+            message = pubsub.get_message()
+            if message and message["type"] == "message":
+                print(message['data'].decode("utf-8"))
+                message_handler(message['data'].decode("utf-8"))
+            time.sleep(1)  # 稍微等待避免过度使用CPU

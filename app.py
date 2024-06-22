@@ -3,6 +3,7 @@ from core.logger import get_logger
 from controller.rag_controller import rag_router
 from controller.data_connect_controller import data_connect_router
 from controller.pandas_controller import pandas_router
+from controller.whisper_controller import whisper_router
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from model.dto import ResData
@@ -17,6 +18,7 @@ app = FastAPI()
 app.include_router(rag_router)
 app.include_router(pandas_router)
 app.include_router(data_connect_router)
+app.include_router(whisper_router)
 
 
 # 业务异常处理
@@ -47,11 +49,13 @@ async def startup_event():
     app.state.redis: redis.Redis = get_redis_pool()
     logger.info("fastapi start")
 
+
 @app.on_event("shutdown")
 async def shutdown_event():
     logger = get_logger()
     app.state.redis.connection_pool.disconnect()
     logger.info("Redis disconnected")
+
 
 if __name__ == "__main__":
     import uvicorn
