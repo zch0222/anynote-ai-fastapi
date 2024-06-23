@@ -1,16 +1,17 @@
 import json
 
 from rocketmq.client import Producer, Message
+from core.config import ROCKETMQ_NAMESERVER_ADDRESS, ROCKETMQ_ACCESS_KEY, ROCKETMQ_ACCESS_SECRET
 
 
 class RocketMQServer:
 
     def send(self, topic: str, tags: str, body: dict):
         producer = Producer('PID-XXX')
-        producer.set_namesrv_addr('127.0.0.1:9876')
+        producer.set_namesrv_addr(ROCKETMQ_NAMESERVER_ADDRESS)
         producer.set_session_credentials(
-            "RocketMQ",
-            "YXLM*20030222",
+            ROCKETMQ_ACCESS_KEY,
+            ROCKETMQ_ACCESS_SECRET,
             None
         )
         producer.start()
