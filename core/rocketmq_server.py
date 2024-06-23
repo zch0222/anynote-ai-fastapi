@@ -7,6 +7,7 @@ from core.config import ROCKETMQ_NAMESERVER_ADDRESS, ROCKETMQ_ACCESS_KEY, ROCKET
 class RocketMQServer:
 
     def send(self, topic: str, tags: str, body: dict):
+        print(topic, tags, body)
         producer = Producer('PID-XXX')
         producer.set_namesrv_addr(ROCKETMQ_NAMESERVER_ADDRESS)
         producer.set_session_credentials(
