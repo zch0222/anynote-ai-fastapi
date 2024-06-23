@@ -18,6 +18,7 @@ class RocketMQServer:
         producer.start()
 
         msg = Message(topic)
+        msg.set_keys(tags)
         msg.set_tags(tags)
         msg.set_body(json.dumps(body))
         ret = producer.send_sync(msg)
