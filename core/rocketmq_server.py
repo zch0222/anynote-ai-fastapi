@@ -9,7 +9,7 @@ class RocketMQServer:
     def send(self, topic: str, tags: str, body: dict):
         print(topic, tags, body)
         producer = Producer('PID-XXX')
-        producer.set_namesrv_addr(ROCKETMQ_NAMESERVER_ADDRESS)
+        producer.set_name_server_address(ROCKETMQ_NAMESERVER_ADDRESS)
         producer.set_session_credentials(
             ROCKETMQ_ACCESS_KEY,
             ROCKETMQ_ACCESS_SECRET,
