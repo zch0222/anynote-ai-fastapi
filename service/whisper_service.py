@@ -12,9 +12,11 @@ from constants.whisper_constants import WHISPER_MEDIA_DIR, WHISPER_MEDIA_AUDIO_D
 import datetime
 from core.minio_server import MinioServer
 from core.aio_redis_server import AIORedisServer
-from core.rocketmq_server import RocketMQServer
 from constants.redis_channel_constants import WHISPER_STATUS_CHANNEL
-from concurrent.futures import ProcessPoolExecutor
+import threading
+from fastapi import BackgroundTasks
+from core.executor import executor
+from constants.redis_constants import WHISPER_STATUS
 from concurrent.futures import ThreadPoolExecutor
 
 import asyncio
@@ -27,12 +29,8 @@ class WhisperService:
         self.minio_server = MinioServer()
         os.makedirs(WHISPER_SRT_DIR, exist_ok=True)
         os.makedirs(WHISPER_TXT_DIR, exist_ok=True)
-        self.executor = ProcessPoolExecutor()
+        self.aio_redis_server = AIORedisServer()
         # self.model = whisper.model(WHISPER_MODEL)
-
-    def __del__(self):
-        print("CLOSE executor----------------------")
-        self.executor.shutdown(wait=True)
 
 
     # 将解码结果保存为 SRT 文件
@@ -53,12 +51,22 @@ class WhisperService:
         with open(txt_file, 'w', encoding='utf-8') as f:
             f.write(result["text"])
 
-    async def run_whisper(self, whisper_run_dto: WhisperRunDTO, channel: str):
+    async def run_whisper(self, whisper_run_dto: WhisperRunDTO, channel: str, status_key: str):
         print(self.device)
         model = whisper.load_model(WHISPER_MODEL).to(self.device)
-        RocketMQServer().send(ROCKETMQ_TOPIC, WHISPER_TASK_STATUS_UPDATED, {
-            "status": "downloading"
+        # RocketMQServer().send(ROCKETMQ_TOPIC, WHISPER_TASK_STATUS_UPDATED, {
+        #     "status": "downloading"
+        # })
+        aio_redis_server = AIORedisServer()
+        await aio_redis_server.set_ex(status_key, {
+            "status": "DOWNLOADING",
+            "data": {}
+        }, 3600)
+        await AIORedisServer().publish(channel, {
+            "status": "DOWNLOADING",
+            "data": {}
         })
+        print("DOWNLOADING----------------------")
         audio_file = download_file(whisper_run_dto.url, WHISPER_MEDIA_DIR)
         # audio_path = f"{WHISPER_MEDIA_AUDIO_DIR}/{audio_file.hash_value}.mp3"
         # extract_sound(audio_file.file_path, audio_path)
@@ -69,12 +77,18 @@ class WhisperService:
         # print(f"Detected language: {max(probs, key=probs.get)}")
         # options = whisper.DecodingOptions(language=whisper_run_dto.language)
         # result = whisper.decode(model, mel, options)
+        await aio_redis_server.set_ex(status_key, {
+            "status": "RUNNING",
+            "data": {}
+        }, 3600)
         await AIORedisServer().publish(channel, {
-            "status": "running"
+            "status": "RUNNING",
+            "data": {}
         })
-        RocketMQServer().send(ROCKETMQ_TOPIC, WHISPER_TASK_STATUS_UPDATED, {
-            "status": "running"
-        })
+
+        # RocketMQServer().send(ROCKETMQ_TOPIC, WHISPER_TASK_STATUS_UPDATED, {
+        #     "status": "running"
+        # })
         result = model.transcribe(audio_file.file_path, language=whisper_run_dto.language)
         srt_file = f"{WHISPER_SRT_DIR}/{audio_file.hash_value}.srt"
         txt_file = f"{WHISPER_TXT_DIR}/{audio_file.hash_value}.txt"
@@ -83,63 +97,79 @@ class WhisperService:
         srt_url = self.minio_server.upload(srt_file, f"{WHISPER_MINIO_SRT_DIR}/{audio_file.hash_value}.srt")
         txt_url = self.minio_server.upload(txt_file, f"{WHISPER_MINIO_TXT_DIR}/{audio_file.hash_value}.txt")
         # print(json.dumps(result, indent=2))
-        RocketMQServer().send(ROCKETMQ_TOPIC, WHISPER_TASK_STATUS_UPDATED, {
-            "status": "finished",
+        # RocketMQServer().send(ROCKETMQ_TOPIC, WHISPER_TASK_STATUS_UPDATED, {
+        #     "status": "finished",
+        #     "data": WhisperRunVO(text=result["text"],
+        #                             srt=srt_url,
+        #                             txt=txt_url).to_dict()
+        # })
+        await aio_redis_server.set_ex(status_key, {
+            "status": "FINISHED",
             "data": WhisperRunVO(text=result["text"],
                                     srt=srt_url,
                                     txt=txt_url).to_dict()
-        })
+        }, 3600)
         await AIORedisServer().publish(channel, {
-            "status": "finished",
+            "status": "FINISHED",
             "data": WhisperRunVO(text=result["text"],
                                     srt=srt_url,
                                     txt=txt_url).to_dict()
         })
+
 
     def on_whisper_status_message(self, message):
         yield 'id: {}\nevent: message\ndata: {}\n\n'.format(int(time.time()), message)
 
-    async def heartbeat(self, channel: str):
+    async def heartbeat(self, channel: str, status_key: str):
         while True:
-            print("HEARTBEAT-----------------------------------------------")
-            await AIORedisServer().publish(channel, {
-                "status": "running"
-            })
-            await asyncio.sleep(10)
+            status = await self.aio_redis_server.get(status_key)
+            print(status)
+            if status is not None:
+                print("HEARTBEAT-----------------------------------------------")
+                await self.aio_redis_server.publish(channel, status)
+            await asyncio.sleep(1)
+
+    def start_whisper(self, whisper_run_dto, channel, status_key: str):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        run_whisper_task = loop.run_until_complete(self.run_whisper(whisper_run_dto, channel, status_key))
+        # run_whisper_task = asyncio.create_task(self.run_whisper(whisper_run_dto, channel))
 
     def submit_whisper_task(self, whisper_run_dto: WhisperRunDTO):
         task_id = uuid.uuid4().__str__()
         channel = f"{WHISPER_STATUS_CHANNEL}:{task_id}"
-        run_whisper_task = asyncio.create_task(self.run_whisper(whisper_run_dto, channel))
+        t = threading.Thread(target=self.start_whisper, args=[whisper_run_dto, channel])
+        # run_whisper_task = asyncio.create_task(self.run_whisper(whisper_run_dto, channel))
+        t.start()
         return WhisperSubmitVO(task_id=task_id)
 
 
-    async def whisper(self, whisper_run_dto: WhisperRunDTO):
+    async def whisper(self, whisper_run_dto: WhisperRunDTO, background_tasks: BackgroundTasks):
         task_id = uuid.uuid4().__str__()
-        loop = asyncio.get_running_loop()
         channel = f"{WHISPER_STATUS_CHANNEL}:{task_id}"
-        run_whisper_task = asyncio.create_task(self.run_whisper(whisper_run_dto, channel))
-        heartbeat_task = asyncio.create_task(self.heartbeat(channel))
-        yield 'id: {}\nevent: message\ndata: {}\n\n'.format(int(time.time()), {
-            "status": "running"
-        })
+        status_key = f"{WHISPER_STATUS}:{task_id}"
+        await self.aio_redis_server.set_ex(status_key, {
+            "status": "DOWNLOADING",
+            "data": {}
+        }, 3600)
+        executor.submit(self.start_whisper, whisper_run_dto, channel, status_key)
+        heartbeat_task = asyncio.create_task(self.heartbeat(channel, status_key))
         try:
             async for message in AIORedisServer().subscribe(channel):
-                if message["status"] == "finished":
-                    heartbeat_task.cancel()
                 yield 'id: {}\nevent: message\ndata: {}\n\n'.format(int(time.time()), json.dumps(message))
+                print("STATUS:" + message["status"])
+                if message["status"] == "FINISHED":
+                    break
         except asyncio.CancelledError:
-            run_whisper_task.cancel()
+            # run_whisper_task.cancel()
             heartbeat_task.cancel()
             print("Client disconnected. All tasks are cancelled.")
         finally:
+            await self.aio_redis_server.delete(status_key)
             # 确保所有任务都被取消或完成
-            if not run_whisper_task.done():
-                run_whisper_task.cancel()
             if not heartbeat_task.done():
                 heartbeat_task.cancel()
-
-        await asyncio.gather(run_whisper_task, heartbeat_task, return_exceptions=True)
+        await asyncio.gather(heartbeat_task, return_exceptions=True)
         print("Tasks are cleaned up after client disconnected or task completed.")
 
     async def get_whisper_task_status(self, task_id):

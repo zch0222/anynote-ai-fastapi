@@ -3,13 +3,19 @@ import json
 import aioredis
 import asyncio
 from core.redis import get_aio_redis_pool
+from core.logger import get_logger
 
 
 class AIORedisServer:
 
     def __init__(self):
         self.redis = get_aio_redis_pool()
+        self.logger = get_logger()
         pass
+
+    def __del__(self):
+        self.redis.close()
+        self.logger.info("CLOSE REDIS POOL")
 
     async def subscribe(self, channel: str):
         """
@@ -29,10 +35,17 @@ class AIORedisServer:
                     print(message["data"])
                     yield json.loads(message['data'])
         finally:
-            # 在结束前取消订阅并关闭连接
             await sub.unsubscribe(channel)
-            await self.redis.close()
 
     async def publish(self, channel: str, message):
         await self.redis.publish(channel, json.dumps(message))
-        await self.redis.close()
+
+    async def set_ex(self, key: str, value: dict, ex: int):
+        await self.redis.set(key, json.dumps(value), ex=ex)
+
+    async def get(self, key: str):
+        value = await self.redis.get(key)
+        return json.loads(value)
+
+    async def delete(self, key: str):
+        await self.redis.delete(key)

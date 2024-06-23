@@ -11,8 +11,12 @@ from exceptions import BusinessException
 from core.redis import get_redis_pool
 from core.config import HOST
 import redis
+from core.executor import executor
+
+
 
 app = FastAPI()
+
 
 # 路由
 app.include_router(rag_router)
@@ -55,6 +59,7 @@ async def shutdown_event():
     logger = get_logger()
     app.state.redis.connection_pool.disconnect()
     logger.info("Redis disconnected")
+    executor.shutdown()
 
 
 if __name__ == "__main__":
