@@ -10,7 +10,8 @@ class RocketMQServer:
         producer.set_namesrv_addr('127.0.0.1:9876')
         producer.set_session_credentials(
             "RocketMQ",
-            "YXLM*20030222"
+            "YXLM*20030222",
+            None
         )
         producer.start()
 
