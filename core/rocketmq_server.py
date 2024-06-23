@@ -8,6 +8,10 @@ class RocketMQServer:
     def send(self, topic: str, tags: str, body: dict):
         producer = Producer('PID-XXX')
         producer.set_namesrv_addr('127.0.0.1:9876')
+        producer.set_session_credentials(
+            "RocketMQ",
+            "YXLM*20030222"
+        )
         producer.start()
 
         msg = Message(topic)
