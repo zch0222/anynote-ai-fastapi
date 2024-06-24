@@ -53,18 +53,31 @@ class WhisperService:
 
     async def run_whisper(self, whisper_run_dto: WhisperRunDTO, channel: str, status_key: str):
         print(self.device)
+        aio_redis_server = AIORedisServer()
+        await aio_redis_server.publish(status_key, {
+            "type": "STATUS_UPDATE",
+            "status": "LOADING_MODEL",
+            "result": {}
+        })
+        await aio_redis_server.set_ex(status_key, {
+            "type": "STATUS_UPDATE",
+            "status": "LOADING_MODEL",
+            "result": {}
+        }, 3600)
         model = whisper.load_model(WHISPER_MODEL).to(self.device)
         # RocketMQServer().send(ROCKETMQ_TOPIC, WHISPER_TASK_STATUS_UPDATED, {
         #     "status": "downloading"
         # })
-        aio_redis_server = AIORedisServer()
+
         await aio_redis_server.set_ex(status_key, {
+            "type": "STATUS_UPDATE",
             "status": "DOWNLOADING",
-            "data": {}
+            "result": {}
         }, 3600)
         await AIORedisServer().publish(channel, {
+            "type": "STATUS_UPDATE",
             "status": "DOWNLOADING",
-            "data": {}
+            "result": {}
         })
         print("DOWNLOADING----------------------")
         audio_file = download_file(whisper_run_dto.url, WHISPER_MEDIA_DIR)
@@ -78,12 +91,14 @@ class WhisperService:
         # options = whisper.DecodingOptions(language=whisper_run_dto.language)
         # result = whisper.decode(model, mel, options)
         await aio_redis_server.set_ex(status_key, {
+            "type": "STATUS_UPDATE",
             "status": "RUNNING",
-            "data": {}
+            "result": {}
         }, 3600)
         await AIORedisServer().publish(channel, {
+            "type": "STATUS_UPDATE",
             "status": "RUNNING",
-            "data": {}
+            "result": {}
         })
 
         # RocketMQServer().send(ROCKETMQ_TOPIC, WHISPER_TASK_STATUS_UPDATED, {
@@ -104,14 +119,16 @@ class WhisperService:
         #                             txt=txt_url).to_dict()
         # })
         await aio_redis_server.set_ex(status_key, {
+            "type": "STATUS_UPDATE",
             "status": "FINISHED",
-            "data": WhisperRunVO(text=result["text"],
+            "result": WhisperRunVO(text=result["text"],
                                     srt=srt_url,
                                     txt=txt_url).to_dict()
         }, 3600)
         await AIORedisServer().publish(channel, {
+            "type": "STATUS_UPDATE",
             "status": "FINISHED",
-            "data": WhisperRunVO(text=result["text"],
+            "result": WhisperRunVO(text=result["text"],
                                     srt=srt_url,
                                     txt=txt_url).to_dict()
         })
@@ -122,12 +139,21 @@ class WhisperService:
 
     async def heartbeat(self, channel: str, status_key: str):
         while True:
-            status = await self.aio_redis_server.get(status_key)
-            print(status)
-            if status is not None:
-                print("HEARTBEAT-----------------------------------------------")
-                await self.aio_redis_server.publish(channel, status)
-            await asyncio.sleep(1)
+            await asyncio.sleep(10)
+            await self.aio_redis_server.publish(channel, {
+                "type": "HEARTBEAT",
+                "status": "",
+                "result": {}
+            })
+            # status = await self.aio_redis_server.get(status_key)
+            # print(status["type"])
+            # print("HEARTBEAT STATUS" + status)
+            # if status is not None:
+            #     print("HEARTBEAT-----------------------------------------------")
+            #     # print(status["type"])
+            #     status["type"] = "HEARTBEAT"
+            #     await self.aio_redis_server.publish(channel, status)
+
 
     def start_whisper(self, whisper_run_dto, channel, status_key: str):
         loop = asyncio.new_event_loop()
@@ -135,12 +161,16 @@ class WhisperService:
         run_whisper_task = loop.run_until_complete(self.run_whisper(whisper_run_dto, channel, status_key))
         # run_whisper_task = asyncio.create_task(self.run_whisper(whisper_run_dto, channel))
 
-    def submit_whisper_task(self, whisper_run_dto: WhisperRunDTO):
+    async def submit_whisper_task(self, whisper_run_dto: WhisperRunDTO):
         task_id = uuid.uuid4().__str__()
         channel = f"{WHISPER_STATUS_CHANNEL}:{task_id}"
-        t = threading.Thread(target=self.start_whisper, args=[whisper_run_dto, channel])
+        status_key = f"{WHISPER_STATUS}:{task_id}"
+        await self.aio_redis_server.set_ex(status_key, {
+            "status": "STARTING",
+            "data": {}
+        }, 3600)
+        executor.submit(self.start_whisper, whisper_run_dto, channel, status_key)
         # run_whisper_task = asyncio.create_task(self.run_whisper(whisper_run_dto, channel))
-        t.start()
         return WhisperSubmitVO(task_id=task_id)
 
 
@@ -174,12 +204,16 @@ class WhisperService:
 
     async def get_whisper_task_status(self, task_id):
         channel = f"{WHISPER_STATUS_CHANNEL}:{task_id}"
-        heartbeat_task = asyncio.create_task(self.heartbeat(channel))
+        status_key = f"{WHISPER_STATUS}:{task_id}"
+        status = await AIORedisServer().get(status_key)
+        yield 'id: {}\nevent: message\ndata: {}\n\n'.format(int(time.time()), json.dumps(status))
+        heartbeat_task = asyncio.create_task(self.heartbeat(channel, status_key))
         try:
             async for message in AIORedisServer().subscribe(channel):
-                if message["status"] == "finished":
-                    heartbeat_task.cancel()
                 yield 'id: {}\nevent: message\ndata: {}\n\n'.format(int(time.time()), json.dumps(message))
+                if message["status"] == "FINISHED":
+                    heartbeat_task.cancel()
+                    break
         except asyncio.CancelledError:
             heartbeat_task.cancel()
             print("Client disconnected. All tasks are cancelled.")

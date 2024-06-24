@@ -26,7 +26,8 @@ async def whisper(request: Request, data: WhisperRunDTO, background_tasks: Backg
 
 @whisper_router.post("/api/whisper/submit")
 async def whisper_submit(request: Request, data: WhisperRunDTO, service: WhisperService = Depends(get_whisper_service)):
-    return ResData.success(service.submit_whisper_task(data).to_dict())
+    res = await service.submit_whisper_task(data)
+    return ResData.success(res.to_dict())
 
 @whisper_router.get("/api/whisper/{task_id}")
 async def whisper_get_task(request: Request, task_id: str, service: WhisperService = Depends(get_whisper_service)):
